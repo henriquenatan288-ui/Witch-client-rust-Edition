@@ -70,11 +70,6 @@ impl Canvas for Pen<'_> {
     fn text_width(&self, text: &str) -> f32 {
         self.host.text_width(text)
     }
-    fn item_icon(&mut self, name: &str, x: f32, y: f32) -> bool {
-        let stack = ItemStack::new(name, 1);
-        self.host.gui_draw_item(&mut *self.batch, &stack, [x, y]);
-        true
-    }
     fn sprite(&mut self, src: [f32; 4], dst: [f32; 4]) -> bool {
         // CONFERIR: nome/assinatura de `Host::sprite` (native_sprite: batch, name, src, dst).
         self.host.sprite(&mut *self.batch, IMAGE_SPRITE, src, dst)
