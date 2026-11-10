@@ -15,7 +15,7 @@ use witchcore::{Canvas, ClickGui};
 const MOD_ID: &str = "witch";
 /// Tecla que abre o ClickGUI (Right Shift), no nome que o Horizon usa (`key.keyboard.right.shift`).
 /// Moldura do menu (assets/frame.png) como pixels RGBA crus: 640x356, sem depender de crate de PNG.
-const FRAME_RGBA: &[u8] = include_bytes!("../assets/frame.rgba");
+const FRAME_RGBA: &[u8] = include_bytes!("../data/frame.rgba");
 const FRAME_W: u32 = 640;
 const FRAME_H: u32 = 356;
 /// Nome do sprite onde `mod_image` coloca a imagem (MOD_IMAGE_SPRITE do Horizon).
