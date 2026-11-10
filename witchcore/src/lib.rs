@@ -6,14 +6,14 @@ pub mod fly;
 pub mod math;
 pub mod trigger;
 
-pub const ACCENT: u32 = 0xFF8B7FD6;
-const BG: u32 = 0xF2101018;
-const PANEL: u32 = 0xFF181822;
-const ROW: u32 = 0xFF20202C;
-const ROW_HOVER: u32 = 0xFF2A2A3A;
-const OFF: u32 = 0xFF3A3A4A;
-const TEXT: u32 = 0xFFE8E8F0;
-const DIM: u32 = 0xFF9A94B8;
+pub const ACCENT: u32 = 0xFF087BFF;
+const BG: u32 = 0xD900050D;
+const PANEL: u32 = 0xE6090D16;
+const ROW: u32 = 0xC9101724;
+const ROW_HOVER: u32 = 0xE0182B45;
+const OFF: u32 = 0xFF27364A;
+const TEXT: u32 = 0xFFF1F6FF;
+const DIM: u32 = 0xFF8294B0;
 
 pub trait Canvas {
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
@@ -74,6 +74,7 @@ pub fn default_modules() -> Vec<Module> {
         m("Radar", Visuals),
         m("Player ESP", Visuals),
         m("Tracers", Visuals),
+        m("ESP + Tracers", Visuals),
         m("Block ESP", Visuals),
         m("Fullbright", Visuals),
         m("Zoom", Visuals),
@@ -127,6 +128,7 @@ pub struct ClickGui {
     pub blocks: blocks::Selection,
     /// A grade de blocos (estilo inventario criativo) esta aberta no lugar da lista.
     pub picker: bool,
+    picker_category: usize,
     scroll: f32,
 }
 
@@ -138,7 +140,7 @@ impl Default for ClickGui {
 
 impl ClickGui {
     pub fn new() -> Self {
-        Self { modules: default_modules(), category: Category::Visuals, blocks: Default::default(), picker: false, scroll: 0.0 }
+        Self { modules: default_modules(), category: Category::Visuals, blocks: Default::default(), picker: false, picker_category: 0, scroll: 0.0 }
     }
 
     pub fn enabled(&self, name: &str) -> bool {
@@ -171,6 +173,17 @@ impl ClickGui {
     const CELL: f32 = 40.0;
     const CELL_H: f32 = 30.0;
     const BACK_H: f32 = 20.0;
+    const PICKER_TAB_H: f32 = 18.0;
+    const PICKER_TABS: [&'static str; 5] = ["Minerios", "Utilidade", "Construcao", "Redstone", "Outros"];
+    fn picker_indices(category: usize) -> Vec<usize> {
+        blocks::BLOCKS.iter().enumerate().filter_map(|(i, (name, _, _))|
+            (blocks::category_of(name) == category).then_some(i)).collect()
+    }
+    fn picker_tab_rect(area: Rect, i: usize) -> Rect {
+        let gap = 3.0;
+        let w = (area.w - PAD * 2.0 - gap * 4.0) / 5.0;
+        Rect { x: area.x + PAD + i as f32 * (w + gap), y: area.y + PAD + Self::BACK_H, w, h: Self::PICKER_TAB_H }
+    }
 
     fn cols(area: Rect) -> usize {
         (((area.w - PAD * 2.0) / Self::CELL).floor() as usize).max(1)
@@ -180,7 +193,7 @@ impl ClickGui {
         let cols = Self::cols(area);
         Rect {
             x: area.x + PAD + (i % cols) as f32 * Self::CELL,
-            y: area.y + PAD + Self::BACK_H + (i / cols) as f32 * Self::CELL_H - scroll,
+            y: area.y + PAD + Self::BACK_H + Self::PICKER_TAB_H + 4.0 + (i / cols) as f32 * Self::CELL_H - scroll,
             w: Self::CELL - 3.0,
             h: Self::CELL_H - 3.0,
         }
@@ -201,8 +214,8 @@ impl ClickGui {
 
     fn max_scroll(&self, area: Rect) -> f32 {
         if self.picker {
-            let rows = blocks::BLOCKS.len().div_ceil(Self::cols(area)) as f32;
-            return (rows * Self::CELL_H + Self::BACK_H + PAD * 2.0 - area.h).max(0.0);
+            let rows = Self::picker_indices(self.picker_category).len().div_ceil(Self::cols(area)) as f32;
+            return (rows * Self::CELL_H + Self::BACK_H + Self::PICKER_TAB_H + 4.0 + PAD * 2.0 - area.h).max(0.0);
         }
         (self.visible().len() as f32 * ROW_H + PAD * 2.0 - area.h).max(0.0)
     }
@@ -280,7 +293,16 @@ impl ClickGui {
         let b = Self::back_rect(area);
         c.fill(b.x, b.y, b.w, b.h, if b.has(mouse) { ROW_HOVER } else { ROW });
         c.text(b.x + 8.0, b.y + 6.0, "< Voltar  |  toque nos blocos para marcar", TEXT, false);
-        for (i, (name, label, color)) in blocks::BLOCKS.iter().enumerate() {
+        for (tab, label) in Self::PICKER_TABS.iter().enumerate() {
+            let tr = Self::picker_tab_rect(area, tab);
+            let selected = tab == self.picker_category;
+            c.fill(tr.x, tr.y, tr.w, tr.h, if selected { ACCENT } else if tr.has(mouse) { ROW_HOVER } else { ROW });
+            let tw = c.text_width(label);
+            c.text(tr.x + (tr.w - tw) / 2.0, tr.y + 5.0, label, if selected { TEXT } else { DIM }, false);
+        }
+        for (cell_i, block_i) in Self::picker_indices(self.picker_category).iter().copied().enumerate() {
+            let (name, label, color) = &blocks::BLOCKS[block_i];
+            let i = cell_i;
             let r = Self::cell_rect(area, self.scroll, i);
             if r.y < area.y + Self::BACK_H || r.y + r.h > area.y + area.h {
                 continue;
@@ -291,7 +313,6 @@ impl ClickGui {
                 c.fill(r.x, r.y, r.w, 2.0, *color);
                 c.fill(r.x, r.y + r.h - 2.0, r.w, 2.0, *color);
             }
-            // sem icone do bloco ainda: mostra a sigla colorida
             let w = c.text_width(label);
             c.text(r.x + (r.w - w) / 2.0, r.y + 10.0, label, if on { *color } else { DIM }, false);
         }
@@ -303,8 +324,9 @@ impl ClickGui {
             self.scroll = 0.0;
             return;
         }
-        for (i, (name, _, _)) in blocks::BLOCKS.iter().enumerate() {
-            let r = Self::cell_rect(area, self.scroll, i);
+        for (cell_i, block_i) in Self::picker_indices(self.picker_category).iter().copied().enumerate() {
+            let (name, _, _) = &blocks::BLOCKS[block_i];
+            let r = Self::cell_rect(area, self.scroll, cell_i);
             if r.y >= area.y + Self::BACK_H && r.y + r.h <= area.y + area.h && r.has(mouse) {
                 self.blocks.toggle(name);
                 return;
@@ -351,6 +373,13 @@ impl ClickGui {
         let area = Self::list_area(win);
         if self.picker {
             if area.has(mouse) {
+                for tab in 0..Self::PICKER_TABS.len() {
+                    if Self::picker_tab_rect(area, tab).has(mouse) {
+                        self.picker_category = tab;
+                        self.scroll = 0.0;
+                        return true;
+                    }
+                }
                 self.click_picker(mouse, area, 0);
             }
             return true;

@@ -25,3 +25,10 @@ Depois abra o mundo e aperte Right Shift (no celular, ainda nao ha botao para ab
 - Revisao do Horizon fixada em `1453e0e` (`horizon-mixin.toml`).
 - Instalar: aba Mods > "Add from GitHub" com a URL deste repo, ou `horizon-launcher mods add-github <url> --trust-native-code`.
 - Menu abre com Right Shift (ainda sem botao para celular).
+
+
+## First test package
+
+- The source-only package is produced by `python tools/package.py`.
+- GitHub Actions also publishes `witch-0.1.0.hnmod` as the artifact `witch-client-first-test` after both Rust checks pass.
+- The engine build still needs to be confirmed with the matching Horizon launcher and in a real 26.3 instance.

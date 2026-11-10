@@ -15,7 +15,7 @@ use witchcore::{Canvas, ClickGui};
 const MOD_ID: &str = "witch";
 /// Tecla que abre o ClickGUI (Right Shift), no nome que o Horizon usa (`key.keyboard.right.shift`).
 /// Moldura do menu (assets/frame.png) como pixels RGBA crus: 640x356, sem depender de crate de PNG.
-const FRAME_RGBA: &[u8] = include_bytes!("../assets/frame.rgba");
+const FRAME_RGBA: &[u8] = include_bytes!("../data/frame.rgba");
 const FRAME_W: u32 = 640;
 const FRAME_H: u32 = 356;
 /// Nome do sprite onde `mod_image` coloca a imagem (MOD_IMAGE_SPRITE do Horizon).
@@ -69,6 +69,9 @@ impl Canvas for Pen<'_> {
     }
     fn text_width(&self, text: &str) -> f32 {
         self.host.text_width(text)
+    }
+    fn item_icon(&mut self, name: &str, x: f32, y: f32) -> bool {
+        self.host.item(&mut *self.batch, name, [x, y], 16.0)
     }
     fn sprite(&mut self, src: [f32; 4], dst: [f32; 4]) -> bool {
         // CONFERIR: nome/assinatura de `Host::sprite` (native_sprite: batch, name, src, dst).
@@ -148,8 +151,11 @@ impl Hooks for Witch {
         }
     }
 
-    // CONFERIR: `client_tick_post` (native_client_tick_post) e o tipo do evento.
-    fn client_tick_post(&self, host: &mut dyn Host, _: &mut ClientTickEvent<'_>) {
+    fn tick(&self, host: &mut dyn Host) {
+        // This hook also runs on the integrated server; these modules are client-only.
+        if !host.window() {
+            return;
+        }
         let (fly_on, trigger_on, block_on) = {
             let g = self.gui.lock().unwrap();
             (g.enabled("Fly"), g.enabled("Trigger Bot"), g.enabled("Block ESP"))
@@ -195,18 +201,14 @@ impl Hooks for Witch {
             let sel = self.gui.lock().unwrap().blocks.clone();
             let c = [pos[0].floor() as i32, pos[1].floor() as i32, pos[2].floor() as i32];
             let r = SCAN_RADIUS;
-            // CONFERIR: `Host::client_chunks(from, to)` (native_client_chunks), chunks = bloco >> 4.
-            if let Ok(chunks) = host.client_chunks([(c[0] - r) >> 4, (c[2] - r) >> 4], [(c[0] + r) >> 4, (c[2] + r) >> 4]) {
-                struct W<'a>(&'a dyn Host, &'a NativeClientChunks);
-                impl World for W<'_> {
-                    fn name_at(&self, p: [i32; 3]) -> Option<String> {
-                        let id = self.1.block(p);
-                        // CONFERIR: nome do bloco a partir do `BlockStateId` (ar = None).
-                        self.0.block_state_name(id).filter(|n| n != "minecraft:air")
-                    }
+            struct W<'a>(&'a dyn Host);
+            impl World for W<'_> {
+                fn name_at(&self, p: [i32; 3]) -> Option<String> {
+                    let name = self.0.block(p);
+                    (name != "minecraft:air").then_some(name)
                 }
-                live.ores = blocks::scan(&W(&*host, &chunks), c, r, &sel, 400);
             }
+            live.ores = blocks::scan(&W(&*host), c, r, &sel, 400);
         } else if !block_on {
             live.ores.clear();
         }
@@ -215,7 +217,7 @@ impl Hooks for Witch {
     fn gui_render_post(&self, host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
         let (esp, tracers, ores_on) = {
             let g = self.gui.lock().unwrap();
-            (g.enabled("Player ESP"), g.enabled("Tracers"), g.enabled("Block ESP"))
+            (g.enabled("Player ESP") || g.enabled("ESP + Tracers"), g.enabled("Tracers") || g.enabled("ESP + Tracers"), g.enabled("Block ESP"))
         };
         if !(esp || tracers || ores_on) || event.gui_hidden {
             return;
