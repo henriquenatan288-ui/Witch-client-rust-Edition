@@ -1,0 +1,12 @@
+# Witch Client (Rust Edition): mod nativo (trait mod) para o Horizon/Starling.
+# Build: `horizon-launcher native-build <esta pasta> --instance <instancia> --trust-native-code`
+[mod]
+id = "witch"
+version = "0.1.0"
+
+[[crate]]
+id = "witchcore"
+path = "witchcore"
+
+[api]
+path = "engine"
