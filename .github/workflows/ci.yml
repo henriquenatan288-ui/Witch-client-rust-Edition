@@ -16,6 +16,13 @@ jobs:
         working-directory: witchcore
         run: rustup component add clippy && cargo clippy --all-targets -- -D warnings
         continue-on-error: true
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile the Horizon trait-mod crate
+        run: cargo check --manifest-path engine/Cargo.toml
   release:
     # Cria o .hnmod/tag so manualmente; o engine so compila com o launcher do Horizon.
     if: false
