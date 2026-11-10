@@ -4,6 +4,9 @@
 id = "witch"
 version = "0.1.0"
 
+[compatibility]
+horizon_revision = "1453e0e614af4b2d04dd0d228a94162b5d459910"
+
 [[crate]]
 id = "witchcore"
 path = "witchcore"

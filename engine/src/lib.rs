@@ -187,13 +187,9 @@ impl Hooks for Witch {
             None
         };
         // ~12 ticks de cooldown (espada): ataca no ritmo, nao a cada tick
-        if live.trigger.tick(aiming.is_some(), 12) {
-            if let Some(id) = aiming {
-                // CONFERIR: caminho do pacote (horizon_protocol::packets::play::Attack). Nao envia o "swing"
-                // do braco, entao um anticheat atento nota a falta dele.
-                let _ = host.send_packet(ServerboundPlayPacket::Attack(horizon_protocol::packets::play::Attack { id }));
-            }
-        }
+        // Trigger Bot: a API do Horizon nao tem ataque do cliente; o pacote Attack exigiria depender de
+        // horizon-protocol (fora do Cargo.lock permitido). Por isso so detecta o alvo, nao ataca.
+        let _ = live.trigger.tick(aiming.is_some(), 12);
 
         if block_on && live.ticks % SCAN_EVERY == 0 {
             let sel = self.gui.lock().unwrap().blocks.clone();

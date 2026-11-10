@@ -1,0 +1,24 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  witchcore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Testes (logica pura)
+        working-directory: witchcore
+        run: cargo test --all-targets
+      - name: Clippy
+        working-directory: witchcore
+        run: rustup component add clippy && cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+  release:
+    # Cria o .hnmod/tag so manualmente; o engine so compila com o launcher do Horizon.
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "build do engine exige horizon-launcher native-build"

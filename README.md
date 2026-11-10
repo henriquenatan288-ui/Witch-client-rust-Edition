@@ -17,3 +17,11 @@ Depois abra o mundo e aperte Right Shift (no celular, ainda nao ha botao para ab
 1. Compilar no launcher e corrigir o que o `CONFERIR` apontar.
 2. Botao de toque para abrir o menu no Android.
 3. Primeiros modulos reais: FPS, Coordinates, Radar/ESP (API `native_client_entities`).
+
+## Estado honesto (atualizado)
+- Testado: `witchcore` (24 testes, roda no CI).
+- NAO compilado: `engine/` (precisa do launcher do Horizon; nunca foi testado no jogo/Starling).
+- Trigger Bot: so detecta o alvo. A API do Horizon nao tem ataque do cliente e o pacote `Attack` exigiria `horizon-protocol`, entao nao ataca.
+- Revisao do Horizon fixada em `1453e0e` (`horizon-mixin.toml`).
+- Instalar: aba Mods > "Add from GitHub" com a URL deste repo, ou `horizon-launcher mods add-github <url> --trust-native-code`.
+- Menu abre com Right Shift (ainda sem botao para celular).
