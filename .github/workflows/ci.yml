@@ -27,6 +27,22 @@ jobs:
           sudo apt-get install -y pkg-config libasound2-dev
       - name: Compile the Horizon trait-mod crate
         run: cargo check --manifest-path engine/Cargo.toml
+  package:
+    needs: [witchcore, engine]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Package the first-test mod
+        run: python tools/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: witch-client-first-test
+          path: target/witch-0.1.0.hnmod
+          if-no-files-found: error
+          retention-days: 14
   release:
     # Cria o .hnmod/tag so manualmente; o engine so compila com o launcher do Horizon.
     if: false
