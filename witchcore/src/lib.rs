@@ -14,7 +14,14 @@ pub trait Canvas {
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
     fn text(&mut self, x: f32, y: f32, text: &str, rgb: u32, shadow: bool);
     fn text_width(&self, text: &str) -> f32;
+    /// Desenha a parte `src` da imagem da moldura em `dst`. false = sem imagem (usa retangulos).
+    fn sprite(&mut self, _src: [f32; 4], _dst: [f32; 4]) -> bool {
+        false
+    }
 }
+
+/// Tamanho da imagem da moldura (assets/frame.png) em pixels.
+pub const FRAME_SIZE: [f32; 2] = [640.0, 356.0];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
@@ -78,12 +85,18 @@ pub fn default_modules() -> Vec<Module> {
     ]
 }
 
-const W: f32 = 360.0;
-const H: f32 = 220.0;
-const HEAD: f32 = 26.0;
-const TABS: f32 = 84.0;
-const TAB_H: f32 = 24.0;
-const ROW_H: f32 = 24.0;
+// Geometria medida na moldura (assets/frame.png), como fracao da janela.
+const ASPECT: f32 = 775.0 / 1395.0;
+const TABS_X: f32 = 0.0115;
+const TABS_W: f32 = 0.179;
+const TABS_Y: f32 = 0.1406;
+const TAB_PITCH: f32 = 0.0856;
+const TAB_H_F: f32 = 0.075;
+const LIST_X: f32 = 0.2014;
+const LIST_Y: f32 = 0.1148;
+const LIST_W: f32 = 0.790;
+const LIST_H: f32 = 0.871;
+const ROW_H: f32 = 22.0;
 const PAD: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -122,13 +135,26 @@ impl ClickGui {
     }
 
     fn window(screen: [f32; 2]) -> Rect {
-        let w = W.min(screen[0] - 20.0).max(200.0);
-        let h = H.min(screen[1] - 20.0).max(120.0);
+        let mut w = 480.0_f32.min(screen[0] - 10.0).max(200.0);
+        let mut h = w * ASPECT;
+        if h > screen[1] - 10.0 {
+            h = (screen[1] - 10.0).max(110.0);
+            w = h / ASPECT;
+        }
         Rect { x: ((screen[0] - w) / 2.0).floor(), y: ((screen[1] - h) / 2.0).floor(), w, h }
     }
 
+    fn tab_rect(win: Rect, i: usize) -> Rect {
+        Rect {
+            x: win.x + win.w * TABS_X,
+            y: win.y + win.h * (TABS_Y + i as f32 * TAB_PITCH),
+            w: win.w * TABS_W,
+            h: win.h * TAB_H_F,
+        }
+    }
+
     fn list_area(win: Rect) -> Rect {
-        Rect { x: win.x + TABS, y: win.y + HEAD, w: win.w - TABS, h: win.h - HEAD }
+        Rect { x: win.x + win.w * LIST_X, y: win.y + win.h * LIST_Y, w: win.w * LIST_W, h: win.h * LIST_H }
     }
 
     fn visible(&self) -> Vec<usize> {
@@ -145,24 +171,30 @@ impl ClickGui {
 
     pub fn draw(&self, c: &mut dyn Canvas, mouse: [f32; 2], screen: [f32; 2]) {
         let win = Self::window(screen);
-        c.fill(win.x, win.y, win.w, win.h, BG);
-        c.fill(win.x, win.y, win.w, 2.0, ACCENT);
-        c.text(win.x + 8.0, win.y + 9.0, "Witch Client", TEXT, true);
-        let ver = "Rust Edition";
-        let vw = c.text_width(ver);
-        c.text(win.x + win.w - vw - 8.0, win.y + 9.0, ver, DIM, false);
-
-        c.fill(win.x, win.y + HEAD, TABS, win.h - HEAD, PANEL);
+        let skinned = c.sprite([0.0, 0.0, FRAME_SIZE[0], FRAME_SIZE[1]], [win.x, win.y, win.w, win.h]);
+        if !skinned {
+            c.fill(win.x, win.y, win.w, win.h, BG);
+            c.fill(win.x, win.y, win.w, 2.0, ACCENT);
+            c.text(win.x + 8.0, win.y + 6.0, "Witch Client", TEXT, true);
+            let l = Self::list_area(win);
+            c.fill(win.x, win.y + win.h * LIST_Y, l.x - win.x, win.h * LIST_H, PANEL);
+        }
         for (i, cat) in Category::ALL.iter().enumerate() {
-            let r = Rect { x: win.x + 4.0, y: win.y + HEAD + 4.0 + i as f32 * TAB_H, w: TABS - 8.0, h: TAB_H - 2.0 };
+            let r = Self::tab_rect(win, i);
             let sel = *cat == self.category;
             if sel {
-                c.fill(r.x, r.y, r.w, r.h, ROW_HOVER);
-                c.fill(r.x, r.y, 2.0, r.h, ACCENT);
-            } else if r.has(mouse) {
-                c.fill(r.x, r.y, r.w, r.h, ROW);
+                if !skinned {
+                    c.fill(r.x, r.y, r.w, r.h, ROW_HOVER);
+                }
+                c.fill(r.x, r.y + 2.0, 2.0, r.h - 4.0, ACCENT);
+            } else {
+                if r.has(mouse) {
+                    c.fill(r.x, r.y, r.w, r.h, ROW);
+                } else if i >= 4 {
+                    c.fill(r.x, r.y, r.w, r.h, 0xFF0C0C12); // a moldura so traz 4 abas: as outras seguem o mesmo estilo
+                }
             }
-            c.text(r.x + 8.0, r.y + 7.0, cat.name(), if sel { TEXT } else { DIM }, false);
+            c.text(r.x + 8.0, r.y + (r.h - 8.0) / 2.0, cat.name(), if sel { TEXT } else { DIM }, false);
         }
 
         let area = Self::list_area(win);
@@ -202,7 +234,7 @@ impl ClickGui {
             return true;
         }
         for (i, cat) in Category::ALL.iter().enumerate() {
-            let r = Rect { x: win.x + 4.0, y: win.y + HEAD + 4.0 + i as f32 * TAB_H, w: TABS - 8.0, h: TAB_H - 2.0 };
+            let r = Self::tab_rect(win, i);
             if r.has(mouse) {
                 if self.category != *cat {
                     self.category = *cat;
@@ -252,8 +284,8 @@ mod tests {
     const SCREEN: [f32; 2] = [427.0, 240.0];
 
     fn tab_center(i: usize) -> [f32; 2] {
-        let win = ClickGui::window(SCREEN);
-        [win.x + 10.0, win.y + HEAD + 4.0 + i as f32 * TAB_H + 5.0]
+        let r = ClickGui::tab_rect(ClickGui::window(SCREEN), i);
+        [r.x + r.w / 2.0, r.y + r.h / 2.0]
     }
 
     fn row_center(g: &ClickGui, n: usize) -> [f32; 2] {
@@ -298,7 +330,7 @@ mod tests {
     fn scroll_is_clamped() {
         let mut g = ClickGui::new();
         let win = ClickGui::window(SCREEN);
-        let inside = [win.x + 100.0, win.y + 100.0];
+        let inside = [win.x + win.w * 0.5, win.y + win.h * 0.5];
         g.scroll(inside, SCREEN, 50.0);
         assert_eq!(g.scroll, 0.0);
         g.scroll(inside, SCREEN, -50.0);

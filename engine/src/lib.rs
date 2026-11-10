@@ -5,20 +5,29 @@
 //! sao os que mais provavelmente precisam de ajuste quando o launcher mostrar o erro de compilacao.
 use horizon_client::mod_api::*;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use witchcore::{Canvas, ClickGui};
 
 const MOD_ID: &str = "witch";
 /// Tecla que abre o ClickGUI (Right Shift), no nome que o Horizon usa (`key.keyboard.right.shift`).
+/// Moldura do menu (assets/frame.png) como pixels RGBA crus: 640x356, sem depender de crate de PNG.
+const FRAME_RGBA: &[u8] = include_bytes!("../assets/frame.rgba");
+const FRAME_W: u32 = 640;
+const FRAME_H: u32 = 356;
+/// Nome do sprite onde `mod_image` coloca a imagem (MOD_IMAGE_SPRITE do Horizon).
+const IMAGE_SPRITE: &str = "horizon/modimage";
 const OPEN_KEY: &str = "key.keyboard.right.shift";
 
 pub fn hooks() -> Box<dyn Hooks> {
-    Box::new(Witch { gui: Mutex::new(ClickGui::new()), size: Mutex::new([427.0, 240.0]) })
+    Box::new(Witch { gui: Mutex::new(ClickGui::new()), size: Mutex::new([427.0, 240.0]), uploaded: AtomicBool::new(false) })
 }
 
 struct Witch {
     gui: Mutex<ClickGui>,
     /// Tamanho da tela em pixels de GUI, anotado no ultimo desenho (os hooks de clique nao o trazem).
     size: Mutex<[f32; 2]>,
+    /// A moldura ja foi enviada ao atlas do HUD.
+    uploaded: AtomicBool,
 }
 
 struct Pen<'a> {
@@ -36,6 +45,10 @@ impl Canvas for Pen<'_> {
     fn text_width(&self, text: &str) -> f32 {
         self.host.text_width(text)
     }
+    fn sprite(&mut self, src: [f32; 4], dst: [f32; 4]) -> bool {
+        // CONFERIR: nome/assinatura de `Host::sprite` (native_sprite: batch, name, src, dst).
+        self.host.sprite(&mut *self.batch, IMAGE_SPRITE, src, dst)
+    }
 }
 
 impl Witch {
@@ -48,6 +61,13 @@ impl Witch {
 }
 
 impl Hooks for Witch {
+    // CONFERIR: `mod_image` precisa de `&mut dyn Host`; o hook `hud` da (como no exemplo native_gui_overlay_probe).
+    fn hud(&self, host: &mut dyn Host, _: &mut HudEvent<'_>) {
+        if !self.uploaded.load(Ordering::Relaxed) && host.mod_image(FRAME_W, FRAME_H, FRAME_RGBA) {
+            self.uploaded.store(true, Ordering::Relaxed);
+        }
+    }
+
     // CONFERIR: tipo do evento e campos (`key`, `pressed`) do hook `native_key`.
     fn key(&self, host: &mut dyn Host, event: &mut KeyEvent<'_>) {
         if event.pressed && event.key == OPEN_KEY {
