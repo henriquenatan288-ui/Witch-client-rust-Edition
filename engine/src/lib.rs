@@ -6,6 +6,10 @@
 use horizon_client::mod_api::*;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use witchcore::blocks::{self, World};
+use witchcore::fly::{self, FlyInput};
+use witchcore::math::{self, V3};
+use witchcore::trigger::{self, Target};
 use witchcore::{Canvas, ClickGui};
 
 const MOD_ID: &str = "witch";
@@ -16,10 +20,20 @@ const FRAME_W: u32 = 640;
 const FRAME_H: u32 = 356;
 /// Nome do sprite onde `mod_image` coloca a imagem (MOD_IMAGE_SPRITE do Horizon).
 const IMAGE_SPRITE: &str = "horizon/modimage";
+/// Nomes de tecla do Horizon (`native_key`).
+const K_FWD: &str = "key.keyboard.w";
+const K_BACK: &str = "key.keyboard.s";
+const K_LEFT: &str = "key.keyboard.a";
+const K_RIGHT: &str = "key.keyboard.d";
+const K_UP: &str = "key.keyboard.space";
+const K_DOWN: &str = "key.keyboard.left.shift";
+const REACH: f32 = 3.0;
+const SCAN_RADIUS: i32 = 16;
+const SCAN_EVERY: u32 = 20;
 const OPEN_KEY: &str = "key.keyboard.right.shift";
 
 pub fn hooks() -> Box<dyn Hooks> {
-    Box::new(Witch { gui: Mutex::new(ClickGui::new()), size: Mutex::new([427.0, 240.0]), uploaded: AtomicBool::new(false) })
+    Box::new(Witch { gui: Mutex::new(ClickGui::new()), size: Mutex::new([427.0, 240.0]), uploaded: AtomicBool::new(false), live: Mutex::new(Live::default()) })
 }
 
 struct Witch {
@@ -28,6 +42,17 @@ struct Witch {
     size: Mutex<[f32; 2]>,
     /// A moldura ja foi enviada ao atlas do HUD.
     uploaded: AtomicBool,
+    live: Mutex<Live>,
+}
+
+/// Estado dos modulos que roda a cada tick.
+#[derive(Default)]
+struct Live {
+    keys: FlyInput,
+    last_pos: Option<V3>,
+    ticks: u32,
+    trigger: trigger::Timer,
+    ores: Vec<([i32; 3], u32)>,
 }
 
 struct Pen<'a> {
@@ -73,6 +98,17 @@ impl Hooks for Witch {
         if event.pressed && event.key == OPEN_KEY {
             host.mod_screen_open(MOD_ID);
         }
+        let mut live = self.live.lock().unwrap();
+        let down = event.pressed;
+        match event.key {
+            K_FWD => live.keys.forward = down,
+            K_BACK => live.keys.back = down,
+            K_LEFT => live.keys.left = down,
+            K_RIGHT => live.keys.right = down,
+            K_UP => live.keys.up = down,
+            K_DOWN => live.keys.down = down,
+            _ => {}
+        }
     }
 
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
@@ -109,6 +145,127 @@ impl Hooks for Witch {
         let used = self.gui.lock().unwrap().scroll(event.screen.mouse, self.size(), event.scroll[1] as f32);
         if used {
             *event.canceled = true;
+        }
+    }
+
+    // CONFERIR: `client_tick_post` (native_client_tick_post) e o tipo do evento.
+    fn client_tick_post(&self, host: &mut dyn Host, _: &mut ClientTickEvent<'_>) {
+        let (fly_on, trigger_on, block_on) = {
+            let g = self.gui.lock().unwrap();
+            (g.enabled("Fly"), g.enabled("Trigger Bot"), g.enabled("Block ESP"))
+        };
+        let Some(me) = host.player() else { return };
+        let pos: V3 = [me.x as f32, me.y as f32, me.z as f32];
+        let mut live = self.live.lock().unwrap();
+        live.ticks = live.ticks.wrapping_add(1);
+        let vel = live.last_pos.map(|p| [pos[0] - p[0], pos[1] - p[1], pos[2] - p[2]]).unwrap_or([0.0; 3]);
+        live.last_pos = Some(pos);
+
+        if fly_on && host.mod_screen().is_none() {
+            live.keys.yaw_deg = me.yaw;
+            // CONFERIR: `Host::push_player` (native_push_player), em blocos por tick.
+            host.push_player(fly::push(&live.keys, vel, 0.45));
+        }
+
+        let aiming = if trigger_on && host.mod_screen().is_none() {
+            let eye = [pos[0], pos[1] + 1.62, pos[2]];
+            let dir = math::look_dir(me.yaw, me.pitch);
+            // CONFERIR: `Host::client_entities` (native_client_entities); `position` como [f64; 3].
+            let targets: Vec<Target> = host
+                .client_entities()
+                .iter()
+                .filter(|e| e.alive && !e.invisible && !e.spectator && e.player_uuid.is_some())
+                .map(|e| {
+                    let p = e.position;
+                    let (x, y, z) = (p[0] as f32, p[1] as f32, p[2] as f32);
+                    let h = e.height as f32;
+                    Target { id: e.id, min: [x - 0.3, y, z - 0.3], max: [x + 0.3, y + h, z + 0.3] }
+                })
+                .collect();
+            trigger::pick(eye, dir, &targets, REACH)
+        } else {
+            None
+        };
+        // ~12 ticks de cooldown (espada): ataca no ritmo, nao a cada tick
+        if live.trigger.tick(aiming.is_some(), 12) {
+            if let Some(id) = aiming {
+                // CONFERIR: caminho do pacote (horizon_protocol::packets::play::Attack). Nao envia o "swing"
+                // do braco, entao um anticheat atento nota a falta dele.
+                let _ = host.send_packet(ServerboundPlayPacket::Attack(horizon_protocol::packets::play::Attack { id }));
+            }
+        }
+
+        if block_on && live.ticks % SCAN_EVERY == 0 {
+            let sel = self.gui.lock().unwrap().blocks.clone();
+            let c = [pos[0].floor() as i32, pos[1].floor() as i32, pos[2].floor() as i32];
+            let r = SCAN_RADIUS;
+            // CONFERIR: `Host::client_chunks(from, to)` (native_client_chunks), chunks = bloco >> 4.
+            if let Ok(chunks) = host.client_chunks([(c[0] - r) >> 4, (c[2] - r) >> 4], [(c[0] + r) >> 4, (c[2] + r) >> 4]) {
+                struct W<'a>(&'a dyn Host, &'a NativeClientChunks);
+                impl World for W<'_> {
+                    fn name_at(&self, p: [i32; 3]) -> Option<String> {
+                        let id = self.1.block(p);
+                        // CONFERIR: nome do bloco a partir do `BlockStateId` (ar = None).
+                        self.0.block_state_name(id).filter(|n| n != "minecraft:air")
+                    }
+                }
+                live.ores = blocks::scan(&W(&*host, &chunks), c, r, &sel, 400);
+            }
+        } else if !block_on {
+            live.ores.clear();
+        }
+    }
+
+    fn gui_render_post(&self, host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
+        let (esp, tracers, ores_on) = {
+            let g = self.gui.lock().unwrap();
+            (g.enabled("Player ESP"), g.enabled("Tracers"), g.enabled("Block ESP"))
+        };
+        if !(esp || tracers || ores_on) || event.gui_hidden {
+            return;
+        }
+        let Some(cam) = host.camera() else { return };
+        let screen = [event.batch.width, event.batch.height];
+        let cp = cam.position;
+        let eye = [cp[0] as f32, cp[1] as f32 + cam.eye_height, cp[2] as f32];
+        // CONFERIR: `position` em `NativeCamera` e o pe ou o olho? Aqui: pe + eye_height.
+        let rel = |p: V3| [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
+        let proj = |p: V3| math::project(&cam.view, &cam.projection, rel(p), screen);
+        let mut lines: Vec<([f32; 2], [f32; 2], u32)> = Vec::new();
+        let origin = [screen[0] * 0.5, screen[1]];
+
+        if esp || tracers {
+            for e in host.client_entities().iter().filter(|e| e.alive && !e.invisible && !e.spectator && e.player_uuid.is_some()) {
+                let p = e.position;
+                let (x, y, z) = (p[0] as f32, p[1] as f32, p[2] as f32);
+                let (min, max) = ([x - 0.3, y, z - 0.3], [x + 0.3, y + e.height as f32, z + 0.3]);
+                if esp {
+                    for (a, b) in math::box_edges(min, max) {
+                        if let (Some(a), Some(b)) = (proj(a), proj(b)) {
+                            lines.push((a, b, 0xFFB7ACF0));
+                        }
+                    }
+                }
+                if tracers {
+                    if let Some(t) = proj([x, y + e.height as f32 * 0.5, z]) {
+                        lines.push((origin, t, 0xFF8B7FD6));
+                    }
+                }
+            }
+        }
+        if ores_on {
+            for (pos, color) in self.live.lock().unwrap().ores.iter() {
+                let (min, max) = blocks::box_of(*pos);
+                for (a, b) in math::box_edges(min, max) {
+                    if let (Some(a), Some(b)) = (proj(a), proj(b)) {
+                        lines.push((a, b, *color));
+                    }
+                }
+            }
+        }
+        for (a, b, color) in lines {
+            // CONFERIR: `Host::quad` (native_quad: batch, points, argb).
+            host.quad(&mut *event.batch, math::line_quad(a, b, 1.2), color);
         }
     }
 }

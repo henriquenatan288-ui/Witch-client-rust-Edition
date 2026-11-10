@@ -1,6 +1,11 @@
 //! Nucleo do Witch (Rust Edition): ClickGUI sem nenhuma dependencia do Horizon.
 //! Desenha por um `Canvas` e recebe mouse/scroll em pixels de GUI, entao da para testar com `cargo test`.
 
+pub mod blocks;
+pub mod fly;
+pub mod math;
+pub mod trigger;
+
 pub const ACCENT: u32 = 0xFF8B7FD6;
 const BG: u32 = 0xF2101018;
 const PANEL: u32 = 0xFF181822;
@@ -67,15 +72,18 @@ pub fn default_modules() -> Vec<Module> {
     let m = |name, category| Module { name, category, on: false };
     vec![
         m("Radar", Visuals),
-        m("ESP", Visuals),
+        m("Player ESP", Visuals),
         m("Tracers", Visuals),
+        m("Block ESP", Visuals),
         m("Fullbright", Visuals),
         m("Zoom", Visuals),
         m("FPS", Hud),
         m("Coordinates", Hud),
         m("Keystrokes", Hud),
         m("Module List", Hud),
+        m("Fly", Movement),
         m("Auto Sprint", Movement),
+        m("Trigger Bot", Combat),
         m("Auto Walk", Movement),
         m("Auto Respawn", Utility),
         m("Chat Macro", Utility),
@@ -116,6 +124,9 @@ impl Rect {
 pub struct ClickGui {
     pub modules: Vec<Module>,
     pub category: Category,
+    pub blocks: blocks::Selection,
+    /// A grade de blocos (estilo inventario criativo) esta aberta no lugar da lista.
+    pub picker: bool,
     scroll: f32,
 }
 
@@ -127,7 +138,7 @@ impl Default for ClickGui {
 
 impl ClickGui {
     pub fn new() -> Self {
-        Self { modules: default_modules(), category: Category::Visuals, scroll: 0.0 }
+        Self { modules: default_modules(), category: Category::Visuals, blocks: Default::default(), picker: false, scroll: 0.0 }
     }
 
     pub fn enabled(&self, name: &str) -> bool {
@@ -157,11 +168,42 @@ impl ClickGui {
         Rect { x: win.x + win.w * LIST_X, y: win.y + win.h * LIST_Y, w: win.w * LIST_W, h: win.h * LIST_H }
     }
 
+    const CELL: f32 = 40.0;
+    const CELL_H: f32 = 30.0;
+    const BACK_H: f32 = 20.0;
+
+    fn cols(area: Rect) -> usize {
+        (((area.w - PAD * 2.0) / Self::CELL).floor() as usize).max(1)
+    }
+
+    fn cell_rect(area: Rect, scroll: f32, i: usize) -> Rect {
+        let cols = Self::cols(area);
+        Rect {
+            x: area.x + PAD + (i % cols) as f32 * Self::CELL,
+            y: area.y + PAD + Self::BACK_H + (i / cols) as f32 * Self::CELL_H - scroll,
+            w: Self::CELL - 3.0,
+            h: Self::CELL_H - 3.0,
+        }
+    }
+
+    /// Botao "Blocos" na linha do Block ESP (toque funciona no celular, sem botao direito).
+    fn blocks_btn(row: Rect) -> Rect {
+        Rect { x: row.x + row.w - 82.0, y: row.y + 3.0, w: 44.0, h: row.h - 6.0 }
+    }
+
+    fn back_rect(area: Rect) -> Rect {
+        Rect { x: area.x + PAD, y: area.y + PAD, w: area.w - PAD * 2.0, h: Self::BACK_H - 3.0 }
+    }
+
     fn visible(&self) -> Vec<usize> {
         (0..self.modules.len()).filter(|&i| self.modules[i].category == self.category).collect()
     }
 
     fn max_scroll(&self, area: Rect) -> f32 {
+        if self.picker {
+            let rows = blocks::BLOCKS.len().div_ceil(Self::cols(area)) as f32;
+            return (rows * Self::CELL_H + Self::BACK_H + PAD * 2.0 - area.h).max(0.0);
+        }
         (self.visible().len() as f32 * ROW_H + PAD * 2.0 - area.h).max(0.0)
     }
 
@@ -198,6 +240,10 @@ impl ClickGui {
         }
 
         let area = Self::list_area(win);
+        if self.picker {
+            self.draw_picker(c, mouse, area);
+            return;
+        }
         let vis = self.visible();
         if vis.is_empty() {
             c.text(area.x + 10.0, area.y + 10.0, "Nenhum modulo aqui ainda", DIM, false);
@@ -210,7 +256,13 @@ impl ClickGui {
             }
             let m = &self.modules[i];
             c.fill(r.x, r.y, r.w, r.h, if r.has(mouse) { ROW_HOVER } else { ROW });
-            c.text(r.x + 8.0, r.y + 8.0, m.name, TEXT, false);
+            c.text(r.x + 8.0, r.y + 7.0, m.name, TEXT, false);
+            if m.name == "Block ESP" {
+                let b = Self::blocks_btn(r);
+                c.fill(b.x, b.y, b.w, b.h, if b.has(mouse) { ACCENT } else { OFF });
+                let w = c.text_width("Blocos");
+                c.text(b.x + (b.w - w) / 2.0, b.y + 4.0, "Blocos", TEXT, false);
+            }
             let (px, py) = (r.x + r.w - 30.0, r.y + 5.0);
             c.fill(px, py, 22.0, 12.0, if m.on { ACCENT } else { OFF });
             let kx = if m.on { px + 12.0 } else { px + 2.0 };
@@ -224,31 +276,95 @@ impl ClickGui {
         }
     }
 
+    fn draw_picker(&self, c: &mut dyn Canvas, mouse: [f32; 2], area: Rect) {
+        let b = Self::back_rect(area);
+        c.fill(b.x, b.y, b.w, b.h, if b.has(mouse) { ROW_HOVER } else { ROW });
+        c.text(b.x + 8.0, b.y + 6.0, "< Voltar  |  toque nos blocos para marcar", TEXT, false);
+        for (i, (name, label, color)) in blocks::BLOCKS.iter().enumerate() {
+            let r = Self::cell_rect(area, self.scroll, i);
+            if r.y < area.y + Self::BACK_H || r.y + r.h > area.y + area.h {
+                continue;
+            }
+            let on = self.blocks.has(name);
+            c.fill(r.x, r.y, r.w, r.h, if r.has(mouse) { ROW_HOVER } else { ROW });
+            if on {
+                c.fill(r.x, r.y, r.w, 2.0, *color);
+                c.fill(r.x, r.y + r.h - 2.0, r.w, 2.0, *color);
+            }
+            // sem icone do bloco ainda: mostra a sigla colorida
+            let w = c.text_width(label);
+            c.text(r.x + (r.w - w) / 2.0, r.y + 10.0, label, if on { *color } else { DIM }, false);
+        }
+    }
+
+    fn click_picker(&mut self, mouse: [f32; 2], area: Rect, button: i32) {
+        if button == 1 || Self::back_rect(area).has(mouse) {
+            self.picker = false;
+            self.scroll = 0.0;
+            return;
+        }
+        for (i, (name, _, _)) in blocks::BLOCKS.iter().enumerate() {
+            let r = Self::cell_rect(area, self.scroll, i);
+            if r.y >= area.y + Self::BACK_H && r.y + r.h <= area.y + area.h && r.has(mouse) {
+                self.blocks.toggle(name);
+                return;
+            }
+        }
+    }
+
     /// Clique esquerdo. Devolve true se a GUI usou o clique (dentro da janela).
     pub fn click(&mut self, mouse: [f32; 2], screen: [f32; 2], button: i32) -> bool {
         let win = Self::window(screen);
         if !win.has(mouse) {
             return false;
         }
-        if button != 0 {
+        if button > 1 {
+            return true;
+        }
+        if button == 1 {
+            let area = Self::list_area(win);
+            if self.picker {
+                self.click_picker(mouse, area, 1);
+            } else if area.has(mouse) {
+                // botao direito em "Block ESP" abre a grade de blocos
+                for (n, i) in self.visible().into_iter().enumerate() {
+                    let r = Self::row_rect(area, self.scroll, n);
+                    if self.modules[i].name == "Block ESP" && r.has(mouse) {
+                        self.picker = true;
+                        self.scroll = 0.0;
+                    }
+                }
+            }
             return true;
         }
         for (i, cat) in Category::ALL.iter().enumerate() {
             let r = Self::tab_rect(win, i);
             if r.has(mouse) {
-                if self.category != *cat {
+                if self.category != *cat || self.picker {
                     self.category = *cat;
+                    self.picker = false;
                     self.scroll = 0.0;
                 }
                 return true;
             }
         }
         let area = Self::list_area(win);
+        if self.picker {
+            if area.has(mouse) {
+                self.click_picker(mouse, area, 0);
+            }
+            return true;
+        }
         if area.has(mouse) {
             for (n, i) in self.visible().into_iter().enumerate() {
                 let r = Self::row_rect(area, self.scroll, n);
                 if r.y >= area.y && r.y + r.h <= area.y + area.h && r.has(mouse) {
-                    self.modules[i].on = !self.modules[i].on;
+                    if self.modules[i].name == "Block ESP" && Self::blocks_btn(r).has(mouse) {
+                        self.picker = true;
+                        self.scroll = 0.0;
+                    } else {
+                        self.modules[i].on = !self.modules[i].on;
+                    }
                     break;
                 }
             }
@@ -335,6 +451,31 @@ mod tests {
         assert_eq!(g.scroll, 0.0);
         g.scroll(inside, SCREEN, -50.0);
         assert!(g.scroll <= g.max_scroll(ClickGui::list_area(win)));
+    }
+
+    #[test]
+    fn blocks_button_opens_grid_and_select_works() {
+        let mut g = ClickGui::new();
+        g.category = Category::Visuals;
+        let idx = g.visible().iter().position(|&i| g.modules[i].name == "Block ESP").unwrap();
+        let r = ClickGui::row_rect(ClickGui::list_area(ClickGui::window(SCREEN)), g.scroll, idx);
+        let b = ClickGui::blocks_btn(r);
+        g.click([b.x + 3.0, b.y + 3.0], SCREEN, 0);
+        assert!(g.picker && !g.enabled("Block ESP"));
+        let win = ClickGui::window(SCREEN);
+        let area = ClickGui::list_area(win);
+        let r = ClickGui::cell_rect(area, g.scroll, 0);
+        g.click([r.x + 5.0, r.y + 5.0], SCREEN, 0);
+        assert!(g.blocks.has(blocks::BLOCKS[0].0));
+        g.click([r.x + 5.0, r.y + 5.0], SCREEN, 1); // direito fecha
+        assert!(!g.picker);
+    }
+
+    #[test]
+    fn picker_draws_all_cells() {
+        let mut g = ClickGui::new();
+        g.picker = true;
+        g.draw(&mut Null, [0.0, 0.0], SCREEN);
     }
 
     #[test]

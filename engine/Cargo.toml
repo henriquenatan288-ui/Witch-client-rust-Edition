@@ -7,3 +7,5 @@ edition = "2024"
 # O launcher aponta este dependency para o codigo do Horizon que ele compila.
 horizon-client = { git = "https://github.com/horizon-rust/horizon" }
 witchcore = { path = "../witchcore" }
+# CONFERIR: so vale se o Cargo.lock do Horizon tiver esta crate (usada para o pacote de ataque).
+horizon-protocol = { git = "https://github.com/horizon-rust/horizon" }
