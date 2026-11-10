@@ -19,7 +19,6 @@ pub trait Canvas {
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
     fn text(&mut self, x: f32, y: f32, text: &str, rgb: u32, shadow: bool);
     fn text_width(&self, text: &str) -> f32;
-    fn item_icon(&mut self, _name: &str, _x: f32, _y: f32) -> bool { false }
     /// Desenha a parte `src` da imagem da moldura em `dst`. false = sem imagem (usa retangulos).
     fn sprite(&mut self, _src: [f32; 4], _dst: [f32; 4]) -> bool {
         false
@@ -314,9 +313,8 @@ impl ClickGui {
                 c.fill(r.x, r.y, r.w, 2.0, *color);
                 c.fill(r.x, r.y + r.h - 2.0, r.w, 2.0, *color);
             }
-            let icon_drawn = c.item_icon(name, r.x + 8.0, r.y + 2.0);
             let w = c.text_width(label);
-            c.text(r.x + (r.w - w) / 2.0, r.y + if icon_drawn { 20.0 } else { 10.0 }, label, if on { *color } else { DIM }, false);
+            c.text(r.x + (r.w - w) / 2.0, r.y + 10.0, label, if on { *color } else { DIM }, false);
         }
     }
 
