@@ -46,6 +46,13 @@ pub fn category_of(name: &str) -> usize {
     else if name == "minecraft:tnt" { 3 } else { 4 }
 }
 
+pub fn category_of(name: &str) -> usize {
+    if name.contains("_ore") || name == "minecraft:ancient_debris" || name == "minecraft:budding_amethyst" { 0 }
+    else if matches!(name, "minecraft:spawner" | "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:ender_chest" | "minecraft:barrel" | "minecraft:shulker_box") { 1 }
+    else if matches!(name, "minecraft:obsidian" | "minecraft:crying_obsidian" | "minecraft:bedrock" | "minecraft:end_portal_frame" | "minecraft:respawn_anchor") { 2 }
+    else if name == "minecraft:tnt" { 3 } else { 4 }
+}
+
 pub fn color_of(name: &str) -> u32 {
     BLOCKS.iter().find(|b| b.0 == name).map(|b| b.2).unwrap_or(0xFFFFFFFF)
 }
