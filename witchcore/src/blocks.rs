@@ -77,12 +77,12 @@ pub fn scan(world: &dyn World, center: [i32; 3], r: i32, sel: &Selection, cap: u
         for dy in -r..=r {
             for dz in -r..=r {
                 let p = [center[0] + dx, center[1] + dy, center[2] + dz];
-                if let Some(n) = world.name_at(p) {
-                    if sel.has(&n) {
-                        out.push((p, color_of(&n)));
-                        if out.len() >= cap {
-                            return out;
-                        }
+                if let Some(n) = world.name_at(p)
+                    && sel.has(&n)
+                {
+                    out.push((p, color_of(&n)));
+                    if out.len() >= cap {
+                        return out;
                     }
                 }
             }
